@@ -13,12 +13,12 @@ class TestSpider(AbstractSpider):
                  url_generators=None):
         super(TestSpider, self).__init__(
             name=name, store=store,workdir=workdir)
-        self.urls = lambda taskno:['http://www.163.com','http://love.163.com']
+        self.urls = lambda taskno:['http://www.163.com','http://baidu.com']
     def visit(self, url):
         return  urllib2.urlopen(url).read()
     
     def website(self):
-        return 'huatian'
+        return 'test'
         
 spider = TestSpider(name='testspider',workdir='./')
 spider.start()
