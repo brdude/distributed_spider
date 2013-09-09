@@ -8,13 +8,15 @@ Created on 2013-8-20
 from zkconfig import zookeeper
 from kazoo.protocol.states import  EventType
 import logging
-from spider_state import SpiderNodeState
 from bitarray import bitarray
 import pickle
+import time
 from spider_state import SpiderDataState, SpiderNodeState
 logging.basicConfig(level=logging.warn) 
 def info(method, msg):
-    logging.warn(('in %s | ' % method) + str(msg))
+    
+    logging.warn(str(time.time())+(' in %s | ' % method) + str(msg))
+    
 class SpiderManager:
     
     def __init__(self):
@@ -26,6 +28,10 @@ class SpiderManager:
         self.zk = zookeeper()
 
         self.zk.start()
+
+        self.ensure_path()
+        self.set_watch()
+    def ensure_path(self):
         self.zk.ensure_path('/spider/spiders')
         self.zk.ensure_path('/spider/managers')
         
@@ -33,8 +39,8 @@ class SpiderManager:
         self.zk.ensure_path('/spider/data/running')
         self.zk.ensure_path('/spider/data/completed')
         self.zk.ensure_path('/spider/data/error')
-
         
+    def set_watch(self):
         # 监控 如/spider/spiders/huatian/
         # 当有新节点加入时：处理数据分配
         # 当有节点断开时：处理数据错误节点的产生
@@ -53,14 +59,7 @@ class SpiderManager:
                     if node_state.is_new_node():
                         info('spiders_website_watch', 'new spider joined:' + child_path)
                         # alloc data node for the new spider
-                        
-                        task_no = self.alloc_task_no(node_state.website)
-                        node_state.set_task_no(task_no)
-                        info('spiders_website_watch', 'alloc data ok,data block %s'%task_no)
-                        node_state.state = SpiderNodeState.READY
-                        
-                        self.zk.set(child_path, value=node_state.dumps())
-                
+                        self.alloc_task_no(child_path)
                 
                 info('spiders_website_watch', 'check if some spider exit')
                 website = event.path.split('/')[-1]
@@ -77,8 +76,6 @@ class SpiderManager:
                                        value = data_node_state.dumps())
                         self.zk.delete('/spider/data/running/%s/%s' % (website, child))
 
-
-
         # 监控 如/spider/data/running/huatian    
         # 监控children数目变化
         def data_running_website_watch(event):
@@ -91,7 +88,6 @@ class SpiderManager:
                 info('data_running_website_watch', 'data_running_website_watch child num change')
                 self.zk.get_children(event.path, watch=data_running_website_watch)
               
-                
         # 监控 如/spider/data/completed/huatian  
         # 监控children数目变化      
         def data_completed_website_watch(event):
@@ -102,7 +98,8 @@ class SpiderManager:
                 return
             elif event.type == EventType.CHILD:
                 self.zk.get_children(event.path, watch=data_completed_website_watch)
-                info('data_completed_website_watch', 'data_completed_website_watch child num change')          
+                info('data_completed_website_watch', 'data_completed_website_watch child num change')         
+                 
         # 监控 如/spider/data/error/huatian   
         # 监控children数目变化     
         def data_error_website_watch(event):
@@ -119,6 +116,7 @@ class SpiderManager:
         def cws_spiders_watch(event):
             info('cws_spiders_watch', 'cws_spiders_watch triggered:' + str(event))
             for child in self.zk.get_children("/spider/spiders", watch=cws_spiders_watch):
+                info('cws_spiders_watch','set childs watch for /spider/spiders/%s' %child)
                 self.zk.get_children('/spider/spiders/%s' % child, watch=spiders_website_watch)
                 self.zk.set('/spider/spiders/%s' % child, 'ready')
                 
@@ -187,37 +185,55 @@ class SpiderManager:
         # self.zk.get_children("/spider/spiders", watch=cws_spiders_watch)
         self.zk.get_children("/spider/managers", watch=select_leader_managers_watch)
         
-        self.node = self.zk.create('/spider/managers/node_', ephemeral=True, sequence=True)
-
-    def alloc_task_no(self, website):
+        self.node = self.zk.create('/spider/managers/node_', ephemeral=True, sequence=True)      
+    #为website申请任务节点
+    def alloc_task_no(self, child_path):
+        info('alloc_task_no', 'try to alloc task no for %s'%child_path)
+        
+        tx = self.zk.transaction()
+        node_version =  self.zk.get(child_path)[1].version
+        
+        node_state = SpiderNodeState.loads(self.zk.get(child_path)[0])
+        node_state.state = SpiderNodeState.READY
+        node_state.task_no = -1
+        
+        website = child_path.split('/')[-2]
+        
+        #首先检查该网站下是否有错误节点
         childs = self.zk.get_children("/spider/data/error/%s" % website)
         if len(childs)>0:
             info('alloc_task_no','alloc error data node')
-            state = SpiderDataState.loads(self.zk.get("/spider/data/error/%s/%s"%(website,childs[0]))[0])
-            self.zk.delete("/spider/data/error/%s/%s"%(website,childs[0]))
-            return state.task_no
-        path = "/spider/data/running/%s" % website
+            error_node_state = SpiderDataState.loads(self.zk.get("/spider/data/error/%s/%s"%(website,childs[0]))[0])
+            tx.delete("/spider/data/error/%s/%s"%(website,childs[0]))
+            
+            node_state.task_no =  error_node_state.task_no
+        else:
+            path = "/spider/data/running/%s" % website
+            data = self.zk.get(path)
+            bitmap = pickle.loads(data[0])
+            
+            for i in xrange(len(bitmap)):
 
-        data = self.zk.get(path)
-        bitmap = pickle.loads(data[0])
+                if not bitmap[i]:
+                    bitmap[i] = 1
+                    self.zk.set(path, pickle.dumps(bitmap))
+                    node_state.task_no =  i;
+                    break
+        info('alloc_task_no', 'alloc task no %s for %s'%(node_state.task_no,child_path))
         
-        for i in xrange(len(bitmap)):
-            if not bitmap[i]:
-                bitmap[i] = 1
-                self.zk.set(path, pickle.dumps(bitmap))
-                print i
-                return i;
-        return -1
-    
+        tx.set_data(child_path, value=node_state.dumps())
+        tx.commit()
     def success_task(self, task_no):
         return True
     
     def error_task(self, task_no):
         return True
     
-sm = SpiderManager()
+    def schedule(self):
+        while True:
+            time.sleep(1000)        
+
+SpiderManager().schedule()
 
 
-import time
-while True:
-    time.sleep(1000)
+

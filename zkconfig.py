@@ -11,4 +11,4 @@ logging.basicConfig(level=logging.WARN)
 #from kazoo.protocol.states import KazooState
 
 def zookeeper():
-    return  KazooClient(hosts='zkzerver:2181')
+    return  KazooClient(hosts='10.232.3.164:2181')
