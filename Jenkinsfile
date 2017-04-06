@@ -23,5 +23,13 @@ pipeline {
         
       }
     }
+    stage('Testing') {
+      steps {
+        timestamps() {
+          isUnix()
+        }
+        
+      }
+    }
   }
 }
