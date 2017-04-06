@@ -15,5 +15,13 @@ pipeline {
         )
       }
     }
+    stage('Test Stage 2') {
+      steps {
+        retry(count: 5) {
+          echo 'hahahaha'
+        }
+        
+      }
+    }
   }
 }
