@@ -26,7 +26,9 @@ pipeline {
     stage('Testing') {
       steps {
         timestamps() {
-          isUnix()
+          if ( isUnix() ) {
+            echo 'I\'m unix like!'
+          }
         }
         
       }
