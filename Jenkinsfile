@@ -1,7 +1,7 @@
 pipeline {
   agent any
   stages {
-    stage('error') {
+    stage('Test Stage 1') {
       steps {
         parallel(
           "Test 1": {
@@ -9,7 +9,7 @@ pipeline {
             
           },
           "Test 2": {
-            echo 'Well well well!'
+            sh 'echo "Well well well!"'
             
           }
         )
