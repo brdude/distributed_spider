@@ -27,7 +27,7 @@ pipeline {
       steps {
         timestamps() {
           if ( isUnix() ) {
-            echo 'I\'m unix like!'
+            echo 'unix like!'
           }
         }
         
